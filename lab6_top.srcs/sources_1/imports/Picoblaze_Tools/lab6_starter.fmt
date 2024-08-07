@@ -1,0 +1,133 @@
+              ; Author: K. Newlander
+              ; LAB6 Starter Design that contains a global register that defaults to 0 on startup
+              ; Adds '1' for each press of BTNR
+              ; Subtracts '1' for each press of BTNL
+              ; Extra ASM to fix issue with Vivado (see documentation), Skips Address 03
+              JUMP cold_start
+              JUMP cold_start
+              JUMP cold_start
+              JUMP cold_start
+              ; Cold Start
+  cold_start: 
+              ; SLIDERS are assigned to PORT 02
+              ; PUSHBTNs are assigned to PORT 03
+              ; PUSHBTN(0) is used to initiate operation
+              ; PUSHBTN(3) is used to reset design
+              ; NOTE: (s# usage):
+              ; s0,s1,s2 - Used in delay subroutines
+              ; s3,s4 - Stores two global registers for 16-bit value to display
+              ; s5 - Stores the debounced push btn signal
+              ; s6 - Debounced register
+              ; s7    -   Switch[7:0]
+              ; s8    -   Switch[3:0] operand for add and sub operations
+              ; s9    -   Switch[3:0] used for counters in left shift and multiply operations
+              ; sA -   Switch[7:4] selects from 4 different operations (add, sub, left-shift, multiply)
+              ; sB    -   Multiplication temp. result register (lsbs)
+              ; sC    -   Multiplication temp. result register (msbs)
+       reset: LOAD s3, 00           ;reset ALU setpoint to 0
+              LOAD s4, 00           ;reset ALU setpoint to 0
+              OUTPUT s3, 04         ;display reset values
+              OUTPUT s4, 05         ;display reset values
+              LOAD s5, 00
+              LOAD s6, 00
+              LOAD s7, 00
+              LOAD s8, 00
+              LOAD s9, 00
+              LOAD sA, 00
+              LOAD sB, 00
+              LOAD sC, 00
+              ;; wait for btn 3 to be depressed to exit reset state
+              INPUT s5, 03
+              TEST s5, 08
+              JUMP NZ, reset        ;stay in reset until 'depressed'
+              ; Main Processing Loop
+              ; Runs debouncer on input push btns
+              ; Checks current state of push btns to perform operation
+      mainlp: ; Store sliders
+              INPUT s7, 02          ; store sliders
+              LOAD s8, s7           ; store copy of sliders into operand register
+              AND s8, 0F            ; mask upper 4 bits, only use lower 4 bits for operand
+              LOAD s9, s8           ; store copy of operand as counter for mult/shift operations
+              LOAD sA, s7           ; store copy of sliders into operator register
+              LOAD sB, 00           ; reset multiplication reg. values
+              LOAD sC, 00           ; reset multiplication reg. values
+              AND sA, F0            ; mask lower 4 bits, only use upper 4 bits for operator
+              INPUT s5, 03          ; Store push buttons
+              CALL del10ms          ; Debounce/delay
+              INPUT s6, 03          ; store push buttons again
+              AND s5, s6            ; Debounce/delay
+              ; Determine if Btn0 was pressed
+              TEST s5, 01
+              CALL NZ, opcheck
+              ; Determine if Btn3 was pressed
+              TEST s5, 08
+              JUMP NZ, reset        ; Reset
+              ; Update Displays
+              OUTPUT s3, 04         ; Update Display with ALU REG
+              OUTPUT s4, 05
+              JUMP mainlp
+              ;; Check switches[7:4] for operation type
+              ;; All zeroes results in no operation
+     opcheck: TEST sA, 10
+              JUMP NZ, opadd        ; Start Addition
+              TEST sA, 20
+              JUMP NZ, opsub        ; Start Subtraction
+              TEST sA, 40
+              JUMP NZ, opleftshift  ; Start Left Shift
+              TEST sA, 80
+              JUMP NZ, opmult       ; Start Multiplication
+  endopcheck: RETURN 
+              ; ADD OPERATION
+              ; Handles Carry
+       opadd: ADD s3, s8
+              ADDCY s4, 00
+      addend: INPUT s5, 03          ; store current BTNR value
+              TEST s5, 01           ; check if BTNR is still being pressed
+              JUMP NZ, addend       ; loop until BTNR is released
+              JUMP endopcheck       ; BTNR released
+              ; SUBTRACT OPERATION
+              ; Basic Subtract
+       opsub: SUB s3, s8
+              SUBCY s4, 00
+      subend: INPUT s5, 03          ; store current BTNR value
+              TEST s5, 01           ; check if BTNR is still being pressed
+              JUMP NZ, subend       ; loop until BTNR is released
+              JUMP endopcheck       ; BTNR released
+              ; LEFT SHIFT OPERATION
+   shiftloop: SL0 s3
+              SLA s4
+              SUB s9, 01
+ opleftshift: TEST s9, FF
+              JUMP NZ, shiftloop
+leftshiftend: INPUT s5, 03          ; store current BTNR value
+              TEST s5, 01           ; check if BTNR is still being pressed
+              JUMP NZ, leftshiftend ; loop until BTNR is released
+              JUMP endopcheck       ; BTNR released
+              ; MULTIPLY OPERATION
+    multloop: ADD sB, s3            ; temp_result_lsb = result + result (repeated m - 1 times)
+              ADDCY sC, s4          ; temp_result_msb = carry + carry (repeated m - 1 times)
+              SUB s9, 01            ; counter performs multiplication by repeating addition m - 1 times
+      opmult: COMPARE s9, 00        ; if counter = 0, then multiplication loop complete
+              JUMP NZ, multloop     ; if counter > 0, then continue multiplication loop
+     multend: INPUT s5, 03          ; store current BTNR value
+              TEST s5, 01           ; check if BTN0 is still being pressed
+              JUMP NZ, multend      ; loop until BTNR is released
+              LOAD s3, sB           ; store final mult. value in result register
+              LOAD s4, sC           ; store final mult. value in result register
+              JUMP endopcheck       ; BTNR released
+              ;;HELPER FUNCTIONS FROM TESTPROG (used for delay in top level, added a 10ms delay)
+       delms: INPUT s0, 07
+     delmslp: INPUT s1, 07
+              COMPARE s0, s1
+              JUMP Z, delmslp
+              RETURN 
+     del10ms: LOAD s2, F5           ;load 245
+   del10mslp: CALL delms
+              ADD s2, 01
+              JUMP NZ, del10mslp
+              RETURN 
+    del250ms: LOAD s2, 05
+  del250mslp: CALL delms
+              ADD s2, 01
+              JUMP NZ, del250mslp
+              RETURN 
